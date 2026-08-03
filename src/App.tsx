@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AnalysisMap } from './components/AnalysisMap'
 import {
   approximatePolygonAreaM2,
@@ -9,10 +9,14 @@ import {
 } from './lib/analysis'
 import { authenticateEarthEngine, runAnalysis, type AnalysisResult } from './lib/earthEngine'
 import { getEarthEngineConfigurationError } from './lib/config'
+import { readUrlState, writeUrlState, type MapView } from './lib/urlState'
 import './App.css'
 
 function App() {
-  const [coordinates, setCoordinates] = useState<Position[]>([])
+  const initialUrl = useMemo(() => readUrlState(), [])
+  const [coordinates, setCoordinates] = useState<Position[]>(initialUrl.coordinates)
+  const [mapView, setMapView] = useState<MapView>(initialUrl.view)
+  const [fitPolygon] = useState(initialUrl.fitPolygon)
   const [year, setYear] = useState(2024)
   const [minClusters, setMinClusters] = useState(3)
   const [maxClusters, setMaxClusters] = useState(16)
@@ -24,6 +28,10 @@ function App() {
   const [activeLayerNames, setActiveLayerNames] = useState<string[]>(['Nature types'])
   const configurationError = getEarthEngineConfigurationError()
   const areaM2 = useMemo(() => approximatePolygonAreaM2(coordinates), [coordinates])
+
+  useEffect(() => {
+    writeUrlState({ view: mapView, coordinates })
+  }, [mapView, coordinates])
 
   const addPoint = (position: Position) => {
     setCoordinates((current) => [...current, position])
@@ -123,7 +131,15 @@ function App() {
         </aside>
 
         <section className="map-panel">
-          <AnalysisMap coordinates={coordinates} layers={result?.layers ?? []} activeLayerNames={activeLayerNames} onAddPoint={addPoint} />
+          <AnalysisMap
+            coordinates={coordinates}
+            layers={result?.layers ?? []}
+            activeLayerNames={activeLayerNames}
+            view={mapView}
+            fitPolygon={fitPolygon}
+            onAddPoint={addPoint}
+            onViewChange={setMapView}
+          />
           {result && (
             <div className="layer-switcher">
               {result.layers.map((layer) => (

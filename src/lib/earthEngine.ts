@@ -133,7 +133,7 @@ function createGlobalRarityImage(image: any, clusters: any, summaries: ClusterSu
         .reduce(ee.Reducer.sum())
         .sqrt()
         .rename('global_rarity')
-        .updateMask(clusters.eq(summary.id))
+        .updateMask(clusters.eq(ee.Image.constant(summary.id)))
     })
 
   return ee.ImageCollection.fromImages(distances).mosaic()
@@ -174,7 +174,7 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
   const rawStats = await evaluateFeatureProperties(
     ee.FeatureCollection(
       ee.List.sequence(0, parameters.maxClusters - 1).map((clusterId: any) => {
-        const mask = clusters.eq(clusterId)
+        const mask = clusters.eq(ee.Image.constant(clusterId))
         const statistics = image.updateMask(mask).reduceRegion({
           reducer: ee.Reducer.mean(),
           geometry: region,
@@ -217,7 +217,7 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
           .pow(2)
           .reduce(ee.Reducer.sum())
           .sqrt()
-          .updateMask(clusters.eq(summary.id))
+          .updateMask(clusters.eq(ee.Image.constant(summary.id)))
           .reduceRegion({
             reducer: ee.Reducer.mean(),
             geometry: region,
