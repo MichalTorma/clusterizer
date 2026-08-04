@@ -1,27 +1,22 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { useMap } from 'react-leaflet'
-import L from 'leaflet'
+import { useEffect, useId, useState, type KeyboardEvent } from 'react'
 import { formatPhotonLabel, searchPhoton, type PhotonFeature } from '../lib/photon'
+import type { MapFocusRequest } from '../lib/mapFocus'
 
 const DEBOUNCE_MS = 280
 
-export function LocationSearch() {
-  const map = useMap()
+interface LocationSearchProps {
+  bias?: { lat: number; lon: number }
+  onSelect: (focus: Omit<MapFocusRequest, 'id'>) => void
+}
+
+export function LocationSearch({ bias, onSelect }: LocationSearchProps) {
   const listId = useId()
-  const containerRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<PhotonFeature[]>([])
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [activeIndex, setActiveIndex] = useState(-1)
-
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    L.DomEvent.disableClickPropagation(container)
-    L.DomEvent.disableScrollPropagation(container)
-  }, [])
 
   useEffect(() => {
     const trimmed = query.trim()
@@ -37,11 +32,10 @@ export function LocationSearch() {
       setLoading(true)
       setError(undefined)
       try {
-        const center = map.getCenter()
         const features = await searchPhoton(trimmed, {
           limit: 6,
-          lat: center.lat,
-          lon: center.lng,
+          lat: bias?.lat,
+          lon: bias?.lon,
           signal: controller.signal,
         })
         setResults(features)
@@ -60,22 +54,21 @@ export function LocationSearch() {
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [query, map])
+  }, [query, bias?.lat, bias?.lon])
 
   const zoomToFeature = (feature: PhotonFeature) => {
     const [lon, lat] = feature.geometry.coordinates
     const extent = feature.properties.extent
     if (extent) {
       const [west, north, east, south] = extent
-      map.fitBounds(
-        [
+      onSelect({
+        bounds: [
           [south, west],
           [north, east],
         ],
-        { padding: [40, 40], maxZoom: 16 },
-      )
+      })
     } else {
-      map.flyTo([lat, lon], 14, { duration: 0.8 })
+      onSelect({ center: [lat, lon], zoom: 14 })
     }
     setQuery(formatPhotonLabel(feature))
     setResults([])
@@ -104,10 +97,7 @@ export function LocationSearch() {
   }
 
   return (
-    <div className="location-search" ref={containerRef}>
-      <label className="location-search-label" htmlFor="location-search-input">
-        Zoom to location
-      </label>
+    <div className="location-search">
       <input
         id="location-search-input"
         type="search"
@@ -128,7 +118,6 @@ export function LocationSearch() {
         }}
         onKeyDown={onKeyDown}
         onBlur={() => {
-          // Delay so a mousedown on a result can fire first.
           window.setTimeout(() => setOpen(false), 120)
         }}
       />

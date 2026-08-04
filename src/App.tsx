@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AnalysisMap } from './components/AnalysisMap'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AnalysisMap, type AnalysisMapHandle } from './components/AnalysisMap'
+import { AreaUpload } from './components/AreaUpload'
+import { LocationSearch } from './components/LocationSearch'
 import {
   approximatePolygonAreaM2,
   polygonIsValid,
@@ -9,14 +11,28 @@ import {
 } from './lib/analysis'
 import { authenticateEarthEngine, runAnalysis, type AnalysisResult } from './lib/earthEngine'
 import { getEarthEngineConfigurationError } from './lib/config'
+import type { DrawTool } from './lib/drawing'
+import type { MapFocusRequest } from './lib/mapFocus'
 import { readUrlState, writeUrlState, type MapView } from './lib/urlState'
 import './App.css'
 
+const AREA_TOOLS: Array<{ id: DrawTool; label: string; detail: string }> = [
+  { id: 'polygon', label: 'Polygon', detail: 'Click vertices on the map' },
+  { id: 'rectangle', label: 'Rectangle', detail: 'Click and drag on the map' },
+  { id: 'inspect', label: 'Inspect', detail: 'Pan or sample analysed types' },
+]
+
 function App() {
   const initialUrl = useMemo(() => readUrlState(), [])
+  const mapRef = useRef<AnalysisMapHandle>(null)
+  const focusId = useRef(0)
+  const [panelOpen, setPanelOpen] = useState(true)
   const [coordinates, setCoordinates] = useState<Position[]>(initialUrl.coordinates)
   const [mapView, setMapView] = useState<MapView>(initialUrl.view)
   const [fitPolygon] = useState(initialUrl.fitPolygon)
+  const [tool, setTool] = useState<DrawTool>(initialUrl.coordinates.length >= 3 ? 'inspect' : 'polygon')
+  const [focusRequest, setFocusRequest] = useState<MapFocusRequest>()
+  const [draftVertexCount, setDraftVertexCount] = useState(0)
   const [year, setYear] = useState(2024)
   const [minClusters, setMinClusters] = useState(3)
   const [maxClusters, setMaxClusters] = useState(16)
@@ -26,16 +42,76 @@ function App() {
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<AnalysisResult>()
   const [activeLayerNames, setActiveLayerNames] = useState<string[]>(['Nature types'])
+  const [selectedClusterId, setSelectedClusterId] = useState<number>()
+  const [selectedPoint, setSelectedPoint] = useState<Position>()
+  const [highlightUrl, setHighlightUrl] = useState<string>()
+  const [inspecting, setInspecting] = useState(false)
   const configurationError = getEarthEngineConfigurationError()
   const areaM2 = useMemo(() => approximatePolygonAreaM2(coordinates), [coordinates])
+  const selectedSummary = result?.summaries.find((summary) => summary.id === selectedClusterId)
 
   useEffect(() => {
     writeUrlState({ view: mapView, coordinates })
   }, [mapView, coordinates])
 
-  const addPoint = (position: Position) => {
-    setCoordinates((current) => [...current, position])
+  const clearSelection = () => {
+    setSelectedClusterId(undefined)
+    setSelectedPoint(undefined)
+    setHighlightUrl(undefined)
+  }
+
+  const selectCluster = async (clusterId: number, point?: Position) => {
+    if (!result) return
+    setTool('inspect')
+    setInspecting(true)
+    setError(undefined)
+    try {
+      const url = await result.getClusterHighlightUrl(clusterId)
+      setSelectedClusterId(clusterId)
+      setSelectedPoint(point)
+      setHighlightUrl(url)
+      if (!activeLayerNames.includes('Nature types')) {
+        setActiveLayerNames((current) => [...current, 'Nature types'])
+      }
+    } catch (cause) {
+      console.error('Cluster highlight failed:', cause)
+      setError(cause instanceof Error ? cause.message : 'Unable to highlight that nature type.')
+    } finally {
+      setInspecting(false)
+    }
+  }
+
+  const commitShape = (next: Position[]) => {
+    setCoordinates(next)
     setResult(undefined)
+    clearSelection()
+    setError(undefined)
+  }
+
+  const inspectPoint = async (position: Position) => {
+    if (!result || tool !== 'inspect') return
+    setInspecting(true)
+    setError(undefined)
+    try {
+      const clusterId = await result.sampleClusterAt(position[0], position[1])
+      if (clusterId == null) {
+        clearSelection()
+        setError('No analysed pixel at that location. Click inside the analysis polygon.')
+        return
+      }
+      const url = await result.getClusterHighlightUrl(clusterId)
+      setSelectedClusterId(clusterId)
+      setSelectedPoint(position)
+      setHighlightUrl(url)
+      if (!activeLayerNames.includes('Nature types')) {
+        setActiveLayerNames((current) => [...current, 'Nature types'])
+      }
+    } catch (cause) {
+      console.error('Cluster sample failed:', cause)
+      setError(cause instanceof Error ? cause.message : 'Unable to sample that map location.')
+    } finally {
+      setInspecting(false)
+    }
   }
 
   const authenticate = async () => {
@@ -51,11 +127,13 @@ function App() {
 
   const analyze = async () => {
     if (!polygonIsValid(coordinates)) {
-      setError('Click at least three points on the map to draw an analysis polygon.')
+      setError('Draw a polygon or rectangle with at least three vertices before running the analysis.')
+      setPanelOpen(true)
       return
     }
     if (maxClusters <= minClusters) {
       setError('The maximum cluster count must be greater than the minimum.')
+      setPanelOpen(true)
       return
     }
 
@@ -64,13 +142,17 @@ function App() {
     }
     setRunning(true)
     setError(undefined)
+    clearSelection()
     try {
       const nextResult = await runAnalysis(parameters)
       setResult(nextResult)
       setActiveLayerNames(['Nature types'])
+      setTool('inspect')
+      setPanelOpen(true)
     } catch (cause) {
       console.error('Earth Engine analysis failed:', cause)
       setError(cause instanceof Error ? cause.message : 'The analysis could not be completed.')
+      setPanelOpen(true)
     } finally {
       setRunning(false)
     }
@@ -82,63 +164,39 @@ function App() {
     )
   }
 
+  const toolHint =
+    tool === 'polygon'
+      ? draftVertexCount === 0
+        ? 'Click the map to place vertices. Finish by double-click, clicking the first point, or Finish below.'
+        : `${draftVertexCount} points placed — double-click or press Finish to close the polygon.`
+      : tool === 'rectangle'
+        ? 'Click and drag on the map to draw the analysis rectangle.'
+        : result
+          ? inspecting
+            ? 'Sampling the selected pixel…'
+            : 'Click an analysed pixel to highlight every pixel of the same nature type.'
+          : 'Pan the map freely. Choose Polygon or Rectangle when you are ready to draw.'
+
   return (
-    <main>
-      <header>
-        <div>
-          <p className="eyebrow">AlphaEarth Foundations · 10 m annual embeddings</p>
-          <h1>Clusterizer</h1>
-          <p className="subtitle">Find recurring nature types and exceptional pixels in one chosen landscape.</p>
-        </div>
-        <button className="sign-in" onClick={authenticate} disabled={authenticated || Boolean(configurationError)}>
-          {authenticated ? 'Earth Engine connected' : 'Connect Earth Engine'}
-        </button>
-      </header>
-
-      {configurationError && <p className="notice">{configurationError}</p>}
-      {error && <p className="notice error">{error}</p>}
-
-      <section className="workspace">
-        <aside className="controls">
-          <div className="section-heading"><span>01</span><h2>Analysis area</h2></div>
-          <p className="hint">Click the map to place polygon vertices. The analysis retains every valid 10 m pixel.</p>
-          <div className="metrics">
-            <span>{coordinates.length} vertices</span>
-            <span>{(areaM2 / 1e6).toFixed(2)} km²</span>
-            <span>{trainingEstimateLabel(coordinates)}</span>
-          </div>
-          <button className="subtle-button" onClick={() => setCoordinates([])} disabled={!coordinates.length}>Clear polygon</button>
-
-          <div className="section-heading"><span>02</span><h2>Clustering</h2></div>
-          <label>
-            Embedding year
-            <select value={year} onChange={(event) => setYear(Number(event.target.value))}>
-              {[2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017].map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-          <div className="input-pair">
-            <label>Min. clusters<input type="number" min="2" max="40" value={minClusters} onChange={(event) => setMinClusters(Number(event.target.value))} /></label>
-            <label>Max. clusters<input type="number" min="3" max="40" value={maxClusters} onChange={(event) => setMaxClusters(Number(event.target.value))} /></label>
-          </div>
-          <label>
-            Rare-type threshold (m²)
-            <input type="number" min="100" step="100" value={rareAreaM2} onChange={(event) => setRareAreaM2(Number(event.target.value))} />
-          </label>
-          <p className="hint">X-Means chooses a cluster count inside this range. It is run on all valid pixels for bounded polygons.</p>
-          <button className="run-button" onClick={analyze} disabled={!authenticated || running}>
-            {running ? 'Running on Earth Engine…' : 'Run all-pixel analysis'}
-          </button>
-        </aside>
-
+    <main className={`app-shell${panelOpen ? ' panel-open' : ''}`}>
+      <div className="map-stage">
         <section className="map-panel">
           <AnalysisMap
+            ref={mapRef}
             coordinates={coordinates}
             layers={result?.layers ?? []}
             activeLayerNames={activeLayerNames}
             view={mapView}
             fitPolygon={fitPolygon}
-            onAddPoint={addPoint}
+            tool={tool}
+            focusRequest={focusRequest}
+            highlightUrl={highlightUrl}
+            selectedPoint={selectedPoint}
+            onToolChange={setTool}
+            onShapeComplete={commitShape}
+            onInspectPoint={(position) => void inspectPoint(position)}
             onViewChange={setMapView}
+            onPolygonDraftChange={setDraftVertexCount}
           />
           {result && (
             <div className="layer-switcher">
@@ -151,32 +209,207 @@ function App() {
             </div>
           )}
         </section>
-      </section>
+      </div>
 
-      <section className="results">
-        <div>
-          <p className="eyebrow">Results</p>
-          <h2>Nature-type inventory</h2>
-          <p className="hint">Global unusualness measures distance from a cluster centroid; local contrast measures difference from immediate neighbours.</p>
-        </div>
-        {result ? (
-          <div className="result-content">
-            <div className="result-meta">
-              <strong>{result.pixelCount.toLocaleString()}</strong> pixels analysed at 10 m
-              <button className="download-button" onClick={() => void result.download()}>Download cluster GeoTIFF</button>
+      <aside className={`control-bubble${panelOpen ? '' : ' collapsed'}`} aria-label="Clusterizer controls">
+        {panelOpen ? (
+          <>
+            <div className="bubble-header">
+              <div className="bubble-brand">
+                <p className="eyebrow">AlphaEarth · 10 m embeddings</p>
+                <h1>Clusterizer</h1>
+                <p className="subtitle">Recurring nature types and exceptional pixels in one landscape.</p>
+              </div>
+              <div className="bubble-header-actions">
+                <button type="button" className="bubble-collapse" onClick={() => setPanelOpen(false)}>
+                  Collapse
+                </button>
+                <button className="sign-in" onClick={authenticate} disabled={authenticated || Boolean(configurationError)}>
+                  {authenticated ? 'Connected' : 'Connect EE'}
+                </button>
+              </div>
             </div>
-            <div className="cluster-grid">
-              {result.summaries.map((summary) => (
-                <article key={summary.id}>
-                  <span className="cluster-dot">{summary.id}</span>
-                  <div><strong>{(summary.areaM2 / 10_000).toFixed(2)} ha</strong><p>{summary.pixelCount.toLocaleString()} pixels · spread {summary.spread?.toFixed(3) ?? '—'}</p></div>
-                  {summary.isRare && <em>Rare</em>}
-                </article>
-              ))}
+
+            <div className="bubble-body controls">
+              {(configurationError || error) && (
+                <div className="bubble-notices">
+                  {configurationError && <p className="notice">{configurationError}</p>}
+                  {error && <p className="notice error">{error}</p>}
+                </div>
+              )}
+
+              <div className="section-heading"><span>00</span><h2>Zoom to location</h2></div>
+              <p className="hint">Search for a place, then draw the analysis area around it.</p>
+              <LocationSearch
+                bias={{ lat: mapView.center[0], lon: mapView.center[1] }}
+                onSelect={(focus) => {
+                  focusId.current += 1
+                  setFocusRequest({ ...focus, id: focusId.current })
+                }}
+              />
+
+              <div className="section-heading"><span>01</span><h2>Analysis area</h2></div>
+              <p className="hint">Draw on the map, or upload a polygon file.</p>
+              <div className="tool-switcher" role="radiogroup" aria-label="Analysis area tool">
+                {AREA_TOOLS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={tool === item.id}
+                    className={tool === item.id ? 'active' : undefined}
+                    onClick={() => setTool(item.id)}
+                  >
+                    <strong>{item.label}</strong>
+                    <span>{item.detail}</span>
+                  </button>
+                ))}
+              </div>
+              <AreaUpload
+                onImported={(polygon) => {
+                  commitShape(polygon.coordinates)
+                  setTool('inspect')
+                  focusId.current += 1
+                  setFocusRequest({ id: focusId.current, bounds: polygon.bounds })
+                  setError(undefined)
+                }}
+                onError={setError}
+              />
+              <p className="hint tool-hint">{toolHint}</p>
+              <div className="metrics">
+                <span>{coordinates.length} vertices</span>
+                <span>{(areaM2 / 1e6).toFixed(2)} km²</span>
+                <span>{trainingEstimateLabel(coordinates)}</span>
+              </div>
+              <div className="button-row">
+                {tool === 'polygon' && (
+                  <>
+                    <button
+                      className="subtle-button"
+                      onClick={() => mapRef.current?.undoPolygonVertex()}
+                      disabled={draftVertexCount === 0}
+                    >
+                      Undo point
+                    </button>
+                    <button
+                      className="subtle-button"
+                      onClick={() => mapRef.current?.finishPolygonDraft()}
+                      disabled={draftVertexCount < 3}
+                    >
+                      Finish polygon
+                    </button>
+                    <button
+                      className="subtle-button"
+                      onClick={() => mapRef.current?.cancelPolygonDraft()}
+                      disabled={draftVertexCount === 0}
+                    >
+                      Cancel draft
+                    </button>
+                  </>
+                )}
+                <button
+                  className="subtle-button"
+                  onClick={() => {
+                    setCoordinates([])
+                    setResult(undefined)
+                    clearSelection()
+                    mapRef.current?.cancelPolygonDraft()
+                    setTool('polygon')
+                  }}
+                  disabled={!coordinates.length && draftVertexCount === 0}
+                >
+                  Clear area
+                </button>
+              </div>
+              {selectedSummary && (
+                <p className="selection-chip">
+                  Selected type {selectedSummary.id} · {(selectedSummary.areaM2 / 10_000).toFixed(2)} ha
+                  <button type="button" onClick={clearSelection}>Clear</button>
+                </p>
+              )}
+
+              <div className="section-heading"><span>02</span><h2>Clustering</h2></div>
+              <label>
+                Embedding year
+                <select value={year} onChange={(event) => setYear(Number(event.target.value))}>
+                  {[2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017].map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="input-pair">
+                <label>
+                  Min. clusters
+                  <input type="number" min="2" max="40" value={minClusters} onChange={(event) => setMinClusters(Number(event.target.value))} />
+                </label>
+                <label>
+                  Max. clusters
+                  <input type="number" min="3" max="40" value={maxClusters} onChange={(event) => setMaxClusters(Number(event.target.value))} />
+                </label>
+              </div>
+              <label>
+                Rare-type threshold (m²)
+                <input type="number" min="100" step="100" value={rareAreaM2} onChange={(event) => setRareAreaM2(Number(event.target.value))} />
+              </label>
+              <p className="hint">X-Means chooses a cluster count inside this range. It is run on all valid pixels for bounded polygons.</p>
+              <button className="run-button" onClick={analyze} disabled={!authenticated || running}>
+                {running ? 'Running on Earth Engine…' : 'Run all-pixel analysis'}
+              </button>
+
+              <section className="results">
+                <div>
+                  <p className="eyebrow">Results</p>
+                  <h2>Nature-type inventory</h2>
+                  <p className="hint">
+                    Global unusualness measures distance from a cluster centroid; local contrast measures difference from immediate neighbours.
+                    {tool === 'inspect' && result ? ' Click a type below or a map pixel to highlight matching areas.' : ''}
+                  </p>
+                </div>
+                {result ? (
+                  <div className="result-content">
+                    <div className="result-meta">
+                      <strong>{result.pixelCount.toLocaleString()}</strong> pixels · 10 m
+                      <button className="download-button" onClick={() => void result.download()}>GeoTIFF</button>
+                    </div>
+                    <div className="cluster-grid">
+                      {result.summaries.map((summary) => (
+                        <article
+                          key={summary.id}
+                          className={summary.id === selectedClusterId ? 'selected' : undefined}
+                          onClick={() => void selectCluster(summary.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault()
+                              void selectCluster(summary.id)
+                            }
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={summary.id === selectedClusterId}
+                        >
+                          <span className="cluster-dot">{summary.id}</span>
+                          <div>
+                            <strong>{(summary.areaM2 / 10_000).toFixed(2)} ha</strong>
+                            <p>{summary.pixelCount.toLocaleString()} pixels · spread {summary.spread?.toFixed(3) ?? '—'}</p>
+                          </div>
+                          {summary.isRare && <em>Rare</em>}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="empty-state">Connect Earth Engine, draw or upload an area, and run an analysis.</p>
+                )}
+              </section>
             </div>
-          </div>
-        ) : <p className="empty-state">Connect Earth Engine, draw a small polygon, and run an analysis to inspect every identified type.</p>}
-      </section>
+          </>
+        ) : (
+          <button type="button" className="bubble-launch" onClick={() => setPanelOpen(true)} aria-expanded={false}>
+            <span className="bubble-launch-mark">C</span>
+            <strong>Clusterizer</strong>
+          </button>
+        )}
+      </aside>
     </main>
   )
 }

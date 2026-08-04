@@ -33,6 +33,8 @@ export interface AnalysisResult {
   summaries: ClusterSummary[]
   pixelCount: number
   download: () => Promise<void>
+  sampleClusterAt: (longitude: number, latitude: number) => Promise<number | null>
+  getClusterHighlightUrl: (clusterId: number) => Promise<string>
 }
 
 function eeError(error: unknown) {
@@ -252,6 +254,8 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
     mapUrl(localRarity, { min: 0, max: 0.35, palette: ['#183b4e', '#56c596', '#f6d365', '#ed6a5a'] }),
   ])
 
+  const highlightUrlCache = new Map<number, Promise<string>>()
+
   return {
     pixelCount,
     summaries,
@@ -260,6 +264,32 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
       { name: 'Global unusualness', url: globalRarityUrl, opacity: 0.75 },
       { name: 'Local contrast', url: localRarityUrl, opacity: 0.75 },
     ],
+    sampleClusterAt: async (longitude, latitude) => {
+      const sampled = await evaluate<number | null>(
+        clusters
+          .reduceRegion({
+            reducer: ee.Reducer.first(),
+            geometry: ee.Geometry.Point([longitude, latitude]),
+            scale: 10,
+            maxPixels: 1e6,
+          })
+          .get('cluster'),
+      )
+      return sampled == null || Number.isNaN(Number(sampled)) ? null : Number(sampled)
+    },
+    getClusterHighlightUrl: (clusterId) => {
+      const cached = highlightUrlCache.get(clusterId)
+      if (cached) return cached
+
+      const highlight = clusters.eq(ee.Image.constant(clusterId)).selfMask()
+      const pending = mapUrl(highlight, {
+        min: 0,
+        max: 1,
+        palette: ['#ff4d2e'],
+      })
+      highlightUrlCache.set(clusterId, pending)
+      return pending
+    },
     download: async () => {
       const url = await callback<string>((resolve, reject) =>
         clusters.getDownloadURL(
