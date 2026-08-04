@@ -4,7 +4,7 @@ A browser-only Earth Engine application for mapping recurring nature types and u
 
 The app is a static UI tool, not a shared backend. Every Earth Engine request runs as the signed-in user against **their own** Earth Engine–enabled Google Cloud project — the same model as the Code Editor.
 
-Anyone can use a hosted build (for example GitHub Pages): open the site, enter their Cloud project ID, sign in, and run analyses. They do not need to run the app locally.
+Anyone can use a hosted build (for example GitHub Pages): open the site, complete the setup gate with their own Earth Engine Cloud project, and run analyses. They do not need to run the app locally.
 
 ## What it does
 
@@ -52,13 +52,17 @@ npm run dev
 ## Using the tool (any EE user)
 
 1. Open the hosted app (or local dev server).
-2. Click **Sign in** with the Google account that has Earth Engine access.
-3. Pick a Cloud project from the list (or enter an ID manually), then **Use project**.
-4. Draw or upload an analysis area, then run the analysis.
+2. Complete the **setup gate** (map stays hidden until this succeeds):
+   - **Sign in** with the Google account that has Earth Engine access.
+   - **Choose a Cloud project** from the list (or paste a project ID).
+   - Wait for **readiness checks** — the app verifies the Earth Engine API and a tiny compute call on your project. If something is missing, follow the Console link shown for that check.
+3. Draw or upload an analysis area, then run the analysis.
 
-Quota and permissions follow the user's project. The host Cloud project is only used to register the OAuth client for the web app.
+Returning visitors with a stored project ID get a one-click **Continue** that re-signs in and re-verifies before opening the map. Use **Change project** in the control panel to return to setup.
 
-For the project picker, enable **Cloud Resource Manager API** on the Google Cloud project that owns the OAuth client ID.
+Quota and permissions follow the user’s project. The host Cloud project is only used to register the OAuth client for the web app.
+
+For the project picker, enable **Cloud Resource Manager API** on the Google Cloud project that owns the OAuth client ID. If listing fails, users can still enter a project ID manually.
 
 ## Development
 

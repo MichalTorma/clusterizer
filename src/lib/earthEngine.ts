@@ -120,6 +120,58 @@ export function signInWithGoogle() {
   })
 }
 
+export type ProjectListErrorKind = 'crm_disabled' | 'other'
+
+export interface ProjectListVerification {
+  ok: boolean
+  projects: CloudProjectOption[]
+  errorKind?: ProjectListErrorKind
+  message?: string
+}
+
+export type EarthEngineReadyErrorKind =
+  | 'ee_api_disabled'
+  | 'ee_access'
+  | 'permission'
+  | 'unknown'
+
+export interface EarthEngineReadyVerification {
+  ok: boolean
+  projectId: string
+  errorKind?: EarthEngineReadyErrorKind
+  message?: string
+}
+
+function classifyEarthEngineError(message: string): EarthEngineReadyErrorKind {
+  const lower = message.toLowerCase()
+  if (
+    lower.includes('api has not been used')
+    || lower.includes('has not been enabled')
+    || lower.includes('is disabled')
+    || (lower.includes('earthengine.googleapis.com') && lower.includes('enable'))
+  ) {
+    return 'ee_api_disabled'
+  }
+  if (
+    lower.includes('not registered')
+    || lower.includes('no earth engine access')
+    || lower.includes('earth engine access')
+    || lower.includes('signup')
+  ) {
+    return 'ee_access'
+  }
+  if (
+    lower.includes('permission')
+    || lower.includes('denied')
+    || lower.includes('serviceusage')
+    || lower.includes('403')
+    || lower.includes('forbidden')
+  ) {
+    return 'permission'
+  }
+  return 'unknown'
+}
+
 /**
  * List active Cloud projects the signed-in user can see.
  * Earth Engine–labeled projects are sorted first when labels are present.
@@ -174,6 +226,53 @@ export async function listAccessibleCloudProjects(): Promise<CloudProjectOption[
     if (a.earthEngineLabeled !== b.earthEngineLabeled) return a.earthEngineLabeled ? -1 : 1
     return a.displayName.localeCompare(b.displayName)
   })
+}
+
+/**
+ * Soft check: project listing is optional (manual ID still works).
+ * A 403 usually means Cloud Resource Manager API is off on the host OAuth project.
+ */
+export async function verifyProjectListAccess(): Promise<ProjectListVerification> {
+  try {
+    const projects = await listAccessibleCloudProjects()
+    return { ok: true, projects }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    const errorKind: ProjectListErrorKind =
+      message.toLowerCase().includes('cloud resource manager') || message.includes('403')
+        ? 'crm_disabled'
+        : 'other'
+    return { ok: false, projects: [], errorKind, message }
+  }
+}
+
+/**
+ * Hard check: initialize EE against the project and run a tiny read-only evaluate.
+ */
+export async function verifyEarthEngineReady(projectId: string): Promise<EarthEngineReadyVerification> {
+  const trimmed = projectId.trim()
+  if (!trimmed) {
+    return {
+      ok: false,
+      projectId: '',
+      errorKind: 'unknown',
+      message: 'Choose or enter an Earth Engine–enabled Google Cloud project.',
+    }
+  }
+
+  try {
+    await initializeEarthEngineProject(trimmed)
+    await evaluate(ee.Image.constant(1).rename('ok'))
+    return { ok: true, projectId: trimmed }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    return {
+      ok: false,
+      projectId: trimmed,
+      errorKind: classifyEarthEngineError(message),
+      message,
+    }
+  }
 }
 
 /**

@@ -1,0 +1,255 @@
+.setup-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  overflow: auto;
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 10%, rgba(108, 168, 140, 0.35), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 90% 80%, rgba(229, 125, 69, 0.18), transparent 50%),
+    linear-gradient(160deg, #c5d4c8 0%, #e8ebe2 45%, #d4ddd6 100%);
+}
+
+.setup-gate-inner {
+  width: min(440px, 100%);
+  padding: 28px 28px 32px;
+  border-radius: 20px;
+  background: rgba(251, 250, 244, 0.96);
+  border: 1px solid rgba(216, 223, 214, 0.95);
+  box-shadow: 0 22px 56px rgba(25, 59, 51, 0.16);
+}
+
+.setup-eyebrow {
+  margin: 0 0 8px;
+  color: #7a6344;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.setup-gate-inner > h1 {
+  margin: 0;
+  font: 600 clamp(2rem, 5vw, 2.6rem) / 0.95 Georgia, serif;
+  letter-spacing: -0.05em;
+  color: #16362e;
+}
+
+.setup-lede {
+  margin: 12px 0 0;
+  color: #537067;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.setup-steps {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+}
+
+.setup-steps li {
+  flex: 1;
+  text-align: center;
+  padding: 8px 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #7a8f86;
+  background: #eef3ec;
+}
+
+.setup-steps li.active {
+  color: #184737;
+  background: #d7e8df;
+}
+
+.setup-notice {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eef3ec;
+  color: #345549;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.setup-notice.error {
+  background: #f8e8e2;
+  color: #8a3b2a;
+}
+
+.setup-panel {
+  margin-top: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.setup-panel h2 {
+  margin: 0;
+  font: 600 1.15rem / 1.2 Georgia, serif;
+  color: #193b33;
+}
+
+.setup-hint {
+  margin: 0;
+  color: #537067;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.setup-hint a,
+.setup-checklist a {
+  color: #1f6a52;
+  font-weight: 600;
+}
+
+.setup-need {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #436358;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.setup-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #345549;
+}
+
+.setup-field input,
+.setup-field select {
+  width: 100%;
+  border: 1px solid #c7d1c8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #16362e;
+  font-weight: 500;
+}
+
+.setup-primary,
+.setup-secondary {
+  border: 0;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.setup-primary {
+  width: 100%;
+  margin-top: 4px;
+  padding: 12px 18px;
+  background: #1f6a52;
+  color: white;
+  font-size: 0.9rem;
+}
+
+.setup-secondary {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid #c7d1c8;
+  color: #436358;
+  font-size: 0.78rem;
+}
+
+.setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.setup-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.setup-checklist li {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.check-glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #eef3ec;
+  color: #7a8f86;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.check-pass .check-glyph {
+  background: #d7e8df;
+  color: #1f6a52;
+}
+
+.check-fail .check-glyph {
+  background: #f8e8e2;
+  color: #8a3b2a;
+}
+
+.check-soft_fail .check-glyph {
+  background: #f3ecdf;
+  color: #8a6a2a;
+}
+
+.check-running .check-glyph {
+  background: #e4ebe8;
+  color: #1f6a52;
+}
+
+.setup-checklist strong {
+  display: block;
+  font-size: 0.88rem;
+  color: #193b33;
+}
+
+.setup-checklist p {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #537067;
+  line-height: 1.45;
+}
+
+.check-detail {
+  color: #345549 !important;
+}
+
+.setup-checklist a {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.78rem;
+}
+
+.setup-panel code {
+  font-size: 0.85em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #eef3ec;
+}
+
+@media (max-width: 480px) {
+  .setup-gate-inner {
+    padding: 22px 18px 26px;
+  }
+
+  .setup-steps li {
+    font-size: 0.65rem;
+    padding: 7px 4px;
+  }
+}

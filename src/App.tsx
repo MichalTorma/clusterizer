@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnalysisMap, type AnalysisMapHandle } from './components/AnalysisMap'
 import { AreaUpload } from './components/AreaUpload'
 import { LocationSearch } from './components/LocationSearch'
+import { SetupGate } from './components/SetupGate'
 import {
   approximatePolygonAreaM2,
   polygonIsValid,
@@ -9,14 +10,7 @@ import {
   type AnalysisParameters,
   type Position,
 } from './lib/analysis'
-import {
-  initializeEarthEngineProject,
-  listAccessibleCloudProjects,
-  runAnalysis,
-  signInWithGoogle,
-  type AnalysisResult,
-  type CloudProjectOption,
-} from './lib/earthEngine'
+import { runAnalysis, type AnalysisResult } from './lib/earthEngine'
 import {
   getEarthEngineConfigurationError,
   readStoredProjectId,
@@ -49,12 +43,7 @@ function App() {
   const [maxClusters, setMaxClusters] = useState(16)
   const [rareAreaM2, setRareAreaM2] = useState(1_000)
   const [projectId, setProjectId] = useState(() => readStoredProjectId())
-  const [projects, setProjects] = useState<CloudProjectOption[]>([])
-  const [signedIn, setSignedIn] = useState(false)
-  const [authenticated, setAuthenticated] = useState(false)
-  const [connecting, setConnecting] = useState(false)
-  const [loadingProjects, setLoadingProjects] = useState(false)
-  const [manualProjectEntry, setManualProjectEntry] = useState(false)
+  const [setupComplete, setSetupComplete] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<AnalysisResult>()
@@ -68,8 +57,9 @@ function App() {
   const selectedSummary = result?.summaries.find((summary) => summary.id === selectedClusterId)
 
   useEffect(() => {
+    if (!setupComplete) return
     writeUrlState({ view: mapView, coordinates })
-  }, [mapView, coordinates])
+  }, [mapView, coordinates, setupComplete])
 
   const clearSelection = () => {
     setSelectedClusterId(undefined)
@@ -131,71 +121,27 @@ function App() {
     }
   }
 
-  const signIn = async () => {
+  const completeSetup = (nextProjectId: string) => {
+    const trimmed = nextProjectId.trim()
+    writeStoredProjectId(trimmed)
+    setProjectId(trimmed)
+    setSetupComplete(true)
     setError(undefined)
-    setConnecting(true)
-    setAuthenticated(false)
-    try {
-      await signInWithGoogle()
-      setSignedIn(true)
-      setLoadingProjects(true)
-      try {
-        const listed = await listAccessibleCloudProjects()
-        setProjects(listed)
-        const preferred =
-          listed.find((project) => project.projectId === projectId)?.projectId
-          ?? listed.find((project) => project.earthEngineLabeled)?.projectId
-          ?? listed[0]?.projectId
-          ?? projectId
-        if (preferred) setProjectId(preferred)
-        if (!listed.length) setManualProjectEntry(true)
-      } catch (cause) {
-        console.error('Project list failed:', cause)
-        setProjects([])
-        setManualProjectEntry(true)
-        setError(
-          cause instanceof Error
-            ? `${cause.message} You can still enter a project ID manually.`
-            : 'Could not list projects. Enter a project ID manually.',
-        )
-      } finally {
-        setLoadingProjects(false)
-      }
-    } catch (cause) {
-      console.error('Earth Engine sign-in failed:', cause)
-      setSignedIn(false)
-      setAuthenticated(false)
-      setError(cause instanceof Error ? cause.message : 'Unable to sign in with Google.')
-      setPanelOpen(true)
-    } finally {
-      setConnecting(false)
-    }
+    setPanelOpen(true)
   }
 
-  const selectProject = async (nextProjectId = projectId) => {
-    const trimmed = nextProjectId.trim()
-    if (!trimmed) {
-      setError('Choose or enter an Earth Engine–enabled Google Cloud project.')
-      return
-    }
+  const changeProject = () => {
+    setSetupComplete(false)
+    setResult(undefined)
+    clearSelection()
     setError(undefined)
-    setConnecting(true)
-    try {
-      writeStoredProjectId(trimmed)
-      setProjectId(trimmed)
-      await initializeEarthEngineProject(trimmed)
-      setAuthenticated(true)
-    } catch (cause) {
-      console.error('Earth Engine project init failed:', cause)
-      setAuthenticated(false)
-      setError(cause instanceof Error ? cause.message : 'Unable to use that Cloud project with Earth Engine.')
-      setPanelOpen(true)
-    } finally {
-      setConnecting(false)
-    }
   }
 
   const analyze = async () => {
+    if (!setupComplete) {
+      setError('Finish Earth Engine setup before running an analysis.')
+      return
+    }
     if (!polygonIsValid(coordinates)) {
       setError('Draw a polygon or rectangle with at least three vertices before running the analysis.')
       setPanelOpen(true)
@@ -247,6 +193,18 @@ function App() {
             : 'Click an analysed pixel to highlight every pixel of the same nature type.'
           : 'Pan the map freely. Choose Polygon or Rectangle when you are ready to draw.'
 
+  if (!setupComplete) {
+    return (
+      <main className="app-shell setup-pending">
+        <SetupGate
+          configurationError={configurationError}
+          initialProjectId={projectId}
+          onComplete={completeSetup}
+        />
+      </main>
+    )
+  }
+
   return (
     <main className={`app-shell${panelOpen ? ' panel-open' : ''}`}>
       <div className="map-stage">
@@ -294,102 +252,23 @@ function App() {
                 <button type="button" className="bubble-collapse" onClick={() => setPanelOpen(false)}>
                   Collapse
                 </button>
-                <button
-                  className="sign-in"
-                  onClick={() => void (signedIn ? selectProject() : signIn())}
-                  disabled={Boolean(configurationError) || connecting || (signedIn && !projectId.trim())}
-                >
-                  {connecting
-                    ? signedIn
-                      ? 'Connecting…'
-                      : 'Signing in…'
-                    : authenticated
-                      ? 'Reconnect'
-                      : signedIn
-                        ? 'Use project'
-                        : 'Sign in'}
-                </button>
               </div>
             </div>
 
             <div className="bubble-body controls">
-              {(configurationError || error) && (
-                <div className="bubble-notices">
-                  {configurationError && <p className="notice">{configurationError}</p>}
-                  {error && <p className="notice error">{error}</p>}
-                </div>
-              )}
+              <div className="ee-status">
+                <p className="hint">
+                  Connected · <code>{projectId.trim()}</code>
+                </p>
+                <button type="button" className="subtle-button" onClick={changeProject}>
+                  Change project
+                </button>
+              </div>
 
-              <div className="section-heading"><span>EE</span><h2>Your Earth Engine project</h2></div>
-              <p className="hint">
-                Sign in with Google, then pick a Cloud project you can already use in the Code Editor.
-              </p>
-              {!signedIn ? (
-                <p className="hint">Click <strong>Sign in</strong> to load your projects.</p>
-              ) : (
-                <>
-                  {loadingProjects ? (
-                    <p className="hint">Loading your Cloud projects…</p>
-                  ) : projects.length > 0 && !manualProjectEntry ? (
-                    <label>
-                      Cloud project
-                      <select
-                        value={projectId}
-                        onChange={(event) => {
-                          setProjectId(event.target.value)
-                          if (authenticated) setAuthenticated(false)
-                        }}
-                      >
-                        {projects.map((project) => (
-                          <option key={project.projectId} value={project.projectId}>
-                            {project.displayName}
-                            {project.displayName !== project.projectId ? ` (${project.projectId})` : ''}
-                            {project.earthEngineLabeled ? ' · EE' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <label>
-                      Cloud project ID
-                      <input
-                        type="text"
-                        value={projectId}
-                        autoComplete="off"
-                        spellCheck={false}
-                        placeholder="my-ee-cloud-project"
-                        onChange={(event) => {
-                          setProjectId(event.target.value)
-                          if (authenticated) setAuthenticated(false)
-                        }}
-                      />
-                    </label>
-                  )}
-                  <div className="button-row">
-                    {projects.length > 0 && (
-                      <button
-                        type="button"
-                        className="subtle-button"
-                        onClick={() => setManualProjectEntry((value) => !value)}
-                      >
-                        {manualProjectEntry ? 'Use project list' : 'Enter ID manually'}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="subtle-button"
-                      disabled={loadingProjects || connecting}
-                      onClick={() => void signIn()}
-                    >
-                      Refresh projects
-                    </button>
-                  </div>
-                  <p className="hint">
-                    {authenticated
-                      ? `Ready — Earth Engine requests use “${projectId.trim()}”.`
-                      : 'Choose a project, then click Use project.'}
-                  </p>
-                </>
+              {error && (
+                <div className="bubble-notices">
+                  <p className="notice error">{error}</p>
+                </div>
               )}
 
               <div className="section-heading"><span>00</span><h2>Zoom to location</h2></div>
@@ -506,7 +385,7 @@ function App() {
                 <input type="number" min="100" step="100" value={rareAreaM2} onChange={(event) => setRareAreaM2(Number(event.target.value))} />
               </label>
               <p className="hint">X-Means chooses a cluster count inside this range. It is run on all valid pixels for bounded polygons.</p>
-              <button className="run-button" onClick={analyze} disabled={!authenticated || running}>
+              <button className="run-button" onClick={() => void analyze()} disabled={running}>
                 {running ? 'Running on Earth Engine…' : 'Run all-pixel analysis'}
               </button>
 
@@ -552,7 +431,7 @@ function App() {
                     </div>
                   </div>
                 ) : (
-                  <p className="empty-state">Connect Earth Engine, draw or upload an area, and run an analysis.</p>
+                  <p className="empty-state">Draw or upload an area, then run an analysis.</p>
                 )}
               </section>
             </div>

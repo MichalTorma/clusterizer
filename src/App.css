@@ -143,6 +143,26 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.ee-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e4ebe3;
+}
+
+.ee-status .hint {
+  margin: 0;
+  min-width: 0;
+}
+
+.ee-status code {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
 h1, h2, p { margin: 0; }
 h2 { font: 600 1.02rem/1.2 Georgia, serif; color: #193b33; }
 .eyebrow { color: #7a6344; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; }
