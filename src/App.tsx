@@ -45,6 +45,7 @@ function App() {
   const [rareAreaM2, setRareAreaM2] = useState(1_000)
   const [projectId, setProjectId] = useState(() => readStoredProjectId())
   const [setupComplete, setSetupComplete] = useState(false)
+  const [autoResumeSetup, setAutoResumeSetup] = useState(true)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<AnalysisResult>()
@@ -127,11 +128,13 @@ function App() {
     writeStoredProjectId(trimmed)
     setProjectId(trimmed)
     setSetupComplete(true)
+    setAutoResumeSetup(true)
     setError(undefined)
     setPanelOpen(true)
   }
 
   const changeProject = () => {
+    setAutoResumeSetup(false)
     setSetupComplete(false)
     setResult(undefined)
     clearSelection()
@@ -200,6 +203,7 @@ function App() {
         <SetupGate
           configurationError={configurationError}
           initialProjectId={projectId}
+          autoResume={autoResumeSetup}
           onComplete={completeSetup}
         />
       </main>

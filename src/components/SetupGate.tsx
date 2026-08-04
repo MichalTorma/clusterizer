@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   signInWithGoogle,
+  tryRestoreGoogleSignIn,
   verifyEarthEngineReady,
   verifyProjectListAccess,
   type CloudProjectOption,
@@ -23,6 +24,8 @@ type SetupStep = 'welcome' | 'project' | 'checks'
 export interface SetupGateProps {
   configurationError?: string
   initialProjectId: string
+  /** When true, silently restore auth and enter the app if a stored project verifies. */
+  autoResume?: boolean
   onComplete: (projectId: string) => void
 }
 
@@ -41,16 +44,24 @@ function statusGlyph(status: SetupCheckItem['status']) {
   }
 }
 
-export function SetupGate({ configurationError, initialProjectId, onComplete }: SetupGateProps) {
+export function SetupGate({
+  configurationError,
+  initialProjectId,
+  autoResume = true,
+  onComplete,
+}: SetupGateProps) {
   const hasStoredProject = Boolean(initialProjectId.trim())
   const [step, setStep] = useState<SetupStep>('welcome')
   const [returning, setReturning] = useState(hasStoredProject)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(true)
+  const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState<string>()
   const [projectId, setProjectId] = useState(initialProjectId)
   const [projects, setProjects] = useState<CloudProjectOption[]>([])
   const [manualEntry, setManualEntry] = useState(!hasStoredProject)
   const [checks, setChecks] = useState<SetupCheckItem[]>(() => initialSetupChecks())
+  const projectIdRef = useRef(projectId)
+  projectIdRef.current = projectId
 
   const stepIndex = step === 'welcome' ? 1 : step === 'project' ? 2 : 3
   const preferredProject = useMemo(() => {
@@ -68,14 +79,15 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
     const nextChecks = applyProjectListResult(applySignedIn(baseChecks), listResult)
     setChecks(nextChecks)
     setProjects(listResult.projects)
+    const currentProjectId = projectIdRef.current
     if (!listResult.ok || listResult.projects.length === 0) {
       setManualEntry(true)
     } else {
       const next =
-        listResult.projects.find((project) => project.projectId === projectId.trim())?.projectId
+        listResult.projects.find((project) => project.projectId === currentProjectId.trim())?.projectId
         ?? listResult.projects.find((project) => project.earthEngineLabeled)?.projectId
         ?? listResult.projects[0]?.projectId
-        ?? projectId
+        ?? currentProjectId
       if (next) setProjectId(next)
       setManualEntry(false)
     }
@@ -117,6 +129,61 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
       setBusy(false)
     }
   }
+
+  // On mount: silent session restore only (no popup). Auto-enter when possible.
+  useEffect(() => {
+    if (configurationError) {
+      setBusy(false)
+      setRestoring(false)
+      return
+    }
+
+    let cancelled = false
+
+    const boot = async () => {
+      setBusy(true)
+      setRestoring(true)
+      setError(undefined)
+      try {
+        const restored = await tryRestoreGoogleSignIn()
+        if (cancelled) return
+
+        if (!restored) {
+          setBusy(false)
+          setRestoring(false)
+          return
+        }
+
+        const { nextChecks } = await applyProjectListToState(initialSetupChecks())
+        if (cancelled) return
+
+        const trimmed = projectIdRef.current.trim()
+        if (autoResume && trimmed) {
+          setRestoring(false)
+          setBusy(false)
+          await runVerification(trimmed, nextChecks)
+          return
+        }
+
+        setReturning(false)
+        setStep('project')
+        setBusy(false)
+        setRestoring(false)
+      } catch (cause) {
+        if (cancelled) return
+        console.error('Silent auth restore failed:', cause)
+        setBusy(false)
+        setRestoring(false)
+      }
+    }
+
+    void boot()
+    return () => {
+      cancelled = true
+    }
+    // Mount-only boot; autoResume/project are read from props/refs for this session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSignIn = async () => {
     if (configurationError) {
@@ -223,12 +290,22 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
           </p>
         )}
 
-        {step === 'welcome' && returning && (
+        {restoring && (
+          <div className="setup-panel">
+            <h2>Restoring session</h2>
+            <p className="setup-hint">
+              Checking for an existing Google sign-in — no popup unless we need you to approve access again.
+            </p>
+            <p className="setup-hint">Working…</p>
+          </div>
+        )}
+
+        {!restoring && step === 'welcome' && returning && (
           <div className="setup-panel">
             <h2>Welcome back</h2>
             <p className="setup-hint">
-              Continue with project <code>{projectId.trim()}</code>. We will sign you in and verify
-              Earth Engine before opening the map.
+              Continue with project <code>{projectId.trim()}</code>. Click below to sign in
+              (a Google window opens only if your session expired).
             </p>
             <button
               type="button"
@@ -252,7 +329,7 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
           </div>
         )}
 
-        {step === 'welcome' && !returning && (
+        {!restoring && step === 'welcome' && !returning && (
           <div className="setup-panel">
             <h2>Connect Earth Engine</h2>
             <p className="setup-hint">
@@ -281,7 +358,7 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
           </div>
         )}
 
-        {step === 'project' && (
+        {!restoring && step === 'project' && (
           <div className="setup-panel">
             <h2>Choose your Cloud project</h2>
             <p className="setup-hint">
@@ -361,7 +438,7 @@ export function SetupGate({ configurationError, initialProjectId, onComplete }: 
           </div>
         )}
 
-        {step === 'checks' && (
+        {!restoring && step === 'checks' && (
           <div className="setup-panel">
             <h2>Readiness checks</h2>
             <p className="setup-hint">

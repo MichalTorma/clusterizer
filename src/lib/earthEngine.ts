@@ -99,8 +99,50 @@ function getAuthorizationHeader() {
   return token
 }
 
+function markSignedIn() {
+  googleSignedIn = true
+}
+
+function markSignedOut() {
+  googleSignedIn = false
+}
+
 /**
- * Google sign-in only. Project selection / ee.initialize happen afterwards.
+ * Silent restore only — never opens a login popup.
+ * Returns true when an existing Google/EE session was reused.
+ */
+export function tryRestoreGoogleSignIn() {
+  if (googleSignedIn && ee.data.getAuthToken?.()) {
+    return Promise.resolve(true)
+  }
+
+  const clientId = requireClientId()
+
+  return callback<boolean>((resolve, reject) => {
+    ee.data.authenticateViaOauth(
+      clientId,
+      () => {
+        markSignedIn()
+        resolve(true)
+      },
+      (error: unknown) => {
+        markSignedOut()
+        reject(eeError(error))
+      },
+      OAUTH_SCOPES,
+      // Immediate auth failed: do not fall back to a popup (EE's default).
+      () => {
+        markSignedOut()
+        resolve(false)
+      },
+      true,
+    )
+  })
+}
+
+/**
+ * Interactive sign-in for a user gesture (button click).
+ * Tries a silent restore first; only then opens the OAuth popup.
  */
 export function signInWithGoogle() {
   const clientId = requireClientId()
@@ -109,18 +151,46 @@ export function signInWithGoogle() {
     ee.data.authenticateViaOauth(
       clientId,
       () => {
-        googleSignedIn = true
+        markSignedIn()
         resolve()
       },
       (error: unknown) => {
-        googleSignedIn = false
+        markSignedOut()
         reject(eeError(error))
       },
       OAUTH_SCOPES,
-      undefined,
+      () => {
+        ee.data.authenticateViaPopup(
+          () => {
+            markSignedIn()
+            resolve()
+          },
+          (error: unknown) => {
+            markSignedOut()
+            reject(eeError(error))
+          },
+        )
+      },
       true,
     )
   })
+}
+
+/**
+ * Ensure a usable auth token before EE / Cloud API calls.
+ * Silent only — returns false if the user must click Sign in again.
+ */
+export async function ensureGoogleSignedIn() {
+  if (ee.data.getAuthToken?.()) {
+    markSignedIn()
+    return true
+  }
+  try {
+    return await tryRestoreGoogleSignIn()
+  } catch {
+    markSignedOut()
+    return false
+  }
 }
 
 export type ProjectListErrorKind = 'crm_disabled' | 'other'
@@ -236,6 +306,15 @@ export async function listAccessibleCloudProjects(): Promise<CloudProjectOption[
  * A 403 usually means Cloud Resource Manager API is off on the host OAuth project.
  */
 export async function verifyProjectListAccess(): Promise<ProjectListVerification> {
+  if (!(await ensureGoogleSignedIn())) {
+    return {
+      ok: false,
+      projects: [],
+      errorKind: 'other',
+      message: 'Sign in with Google before listing Cloud projects.',
+    }
+  }
+
   try {
     const projects = await listAccessibleCloudProjects()
     return { ok: true, projects }
@@ -260,6 +339,15 @@ export async function verifyEarthEngineReady(projectId: string): Promise<EarthEn
       projectId: '',
       errorKind: 'unknown',
       message: 'Choose or enter an Earth Engine–enabled Google Cloud project.',
+    }
+  }
+
+  if (!(await ensureGoogleSignedIn())) {
+    return {
+      ok: false,
+      projectId: trimmed,
+      errorKind: 'unknown',
+      message: 'Sign in with Google before verifying Earth Engine.',
     }
   }
 
@@ -369,6 +457,9 @@ function createGlobalRarityImage(image: any, clusters: any, summaries: ClusterSu
 }
 
 export async function runAnalysis(parameters: AnalysisParameters): Promise<AnalysisResult> {
+  if (!(await ensureGoogleSignedIn())) {
+    throw new Error('Sign in to Earth Engine before running an analysis.')
+  }
   if (!earthEngineInitialized) throw new Error('Sign in to Earth Engine before running an analysis.')
 
   const { image, region } = analysisImage(parameters)

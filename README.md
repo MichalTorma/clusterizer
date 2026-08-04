@@ -33,7 +33,7 @@ The **map stays hidden** until setup succeeds.
 3. Draw or upload an analysis area, tune clustering options if needed, then run the analysis.
 4. Inspect types from the inventory or by clicking the map; download a GeoTIFF when useful.
 
-**Returning visitors:** if a project ID is stored in the browser, the gate offers **Continue** — one click re-signs in and re-verifies before opening the map. Use **Change project** in the control panel to go back to setup.
+Returning visitors: the app silently reuses an existing Google session when possible and opens the map after re-verifying the stored project — no login popup unless the session expired. Use **Change project** in the control panel to return to setup without auto-entering.
 
 ### What you need (end user)
 
