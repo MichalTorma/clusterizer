@@ -10,7 +10,11 @@ import {
   type Position,
 } from './lib/analysis'
 import { authenticateEarthEngine, runAnalysis, type AnalysisResult } from './lib/earthEngine'
-import { getEarthEngineConfigurationError } from './lib/config'
+import {
+  getEarthEngineConfigurationError,
+  readStoredProjectId,
+  writeStoredProjectId,
+} from './lib/config'
 import type { DrawTool } from './lib/drawing'
 import type { MapFocusRequest } from './lib/mapFocus'
 import { readUrlState, writeUrlState, type MapView } from './lib/urlState'
@@ -37,7 +41,9 @@ function App() {
   const [minClusters, setMinClusters] = useState(3)
   const [maxClusters, setMaxClusters] = useState(16)
   const [rareAreaM2, setRareAreaM2] = useState(1_000)
+  const [projectId, setProjectId] = useState(() => readStoredProjectId())
   const [authenticated, setAuthenticated] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<AnalysisResult>()
@@ -116,12 +122,18 @@ function App() {
 
   const authenticate = async () => {
     setError(undefined)
+    setConnecting(true)
     try {
-      await authenticateEarthEngine()
+      writeStoredProjectId(projectId)
+      await authenticateEarthEngine(projectId)
       setAuthenticated(true)
     } catch (cause) {
       console.error('Earth Engine sign-in failed:', cause)
+      setAuthenticated(false)
       setError(cause instanceof Error ? cause.message : 'Unable to sign in to Earth Engine.')
+      setPanelOpen(true)
+    } finally {
+      setConnecting(false)
     }
   }
 
@@ -224,8 +236,12 @@ function App() {
                 <button type="button" className="bubble-collapse" onClick={() => setPanelOpen(false)}>
                   Collapse
                 </button>
-                <button className="sign-in" onClick={authenticate} disabled={authenticated || Boolean(configurationError)}>
-                  {authenticated ? 'Connected' : 'Connect EE'}
+                <button
+                  className="sign-in"
+                  onClick={() => void authenticate()}
+                  disabled={Boolean(configurationError) || connecting || !projectId.trim()}
+                >
+                  {connecting ? 'Connecting…' : authenticated ? 'Reconnect' : 'Connect EE'}
                 </button>
               </div>
             </div>
@@ -237,6 +253,30 @@ function App() {
                   {error && <p className="notice error">{error}</p>}
                 </div>
               )}
+
+              <div className="section-heading"><span>EE</span><h2>Your Earth Engine project</h2></div>
+              <p className="hint">
+                Clusterizer is only a UI. Analysis runs as you, on your EE-enabled Cloud project — the same model as the Code Editor.
+              </p>
+              <label>
+                Cloud project ID
+                <input
+                  type="text"
+                  value={projectId}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="my-ee-cloud-project"
+                  onChange={(event) => {
+                    setProjectId(event.target.value)
+                    if (authenticated) setAuthenticated(false)
+                  }}
+                />
+              </label>
+              <p className="hint">
+                {authenticated
+                  ? `Connected — requests use project “${projectId.trim()}”.`
+                  : 'Find this in the Earth Engine Code Editor project picker, or in Google Cloud Console.'}
+              </p>
 
               <div className="section-heading"><span>00</span><h2>Zoom to location</h2></div>
               <p className="hint">Search for a place, then draw the analysis area around it.</p>

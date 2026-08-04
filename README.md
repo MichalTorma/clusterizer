@@ -2,7 +2,9 @@
 
 A browser-only Earth Engine application for mapping recurring nature types and unusual 10 m pixels from the annual AlphaEarth Foundations Satellite Embedding layer.
 
-The app deliberately does not use an application server or service-account credentials. Every Earth Engine request runs as the signed-in user.
+The app is a static UI tool, not a shared backend. Every Earth Engine request runs as the signed-in user against **their own** Earth Engine–enabled Google Cloud project — the same model as the Code Editor.
+
+Anyone can use a hosted build (for example GitHub Pages): open the site, enter their Cloud project ID, sign in, and run analyses. They do not need to run the app locally.
 
 ## What it does
 
@@ -17,25 +19,50 @@ For a small drawn polygon, Clusterizer:
 
 X-Means is used because it runs natively in Earth Engine and selects a cluster count within a configured range. It is not HDBSCAN: all pixels receive a class, and a high rarity score is an analytical signal rather than proof of a distinct habitat.
 
-## Setup
+## Host on GitHub Pages
 
-1. Create or use a Google Cloud project enabled for Earth Engine.
-2. Create a browser OAuth 2.0 client ID and add the deployed domain (and `http://localhost:5173` for local development) as authorized JavaScript origins.
-3. Copy `.env.example` to `.env.local` and set the public client ID and GCP project ID.
-4. Install and run:
+1. Create a **browser** OAuth 2.0 client ID in Google Cloud Console.
+2. Under Authorized JavaScript origins, add:
+   - `http://localhost:5173` (local development)
+   - `https://<user>.github.io` (GitHub Pages origin — no path)
+3. In the GitHub repo: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+4. In the GitHub repo: **Settings → Secrets and variables → Actions → Variables**, add:
+   - `VITE_EE_OAUTH_CLIENT_ID` = your OAuth client ID  
+   - optional `VITE_EE_PROJECT_ID` = default project suggestion only
+5. Push to `main` (or run the **Deploy GitHub Pages** workflow manually).
+
+The site will be at `https://<user>.github.io/<repo>/`.
+
+The OAuth client ID is intentionally public (it is baked into the static JS). Never add a service-account key or user token to this repository.
+
+### OAuth consent tip
+
+For accounts outside your Cloud org, the OAuth consent screen usually needs to be **External**. While the app is in Testing, add each Google account as a test user, or publish the app when ready.
+
+## Local development
 
 ```bash
+cp .env.example .env.local
+# set VITE_EE_OAUTH_CLIENT_ID
 npm install
 npm run dev
 ```
 
-The browser OAuth flow requires users to have Earth Engine access. The client ID is intentionally public; never add a service-account key or user token to this repository.
+## Using the tool (any EE user)
+
+1. Open the hosted app (or local dev server).
+2. Enter **your** Earth Engine Cloud project ID (same project as in the Code Editor).
+3. Click **Connect EE** and sign in with the Google account that has Earth Engine access.
+4. Draw or upload an analysis area, then run the analysis.
+
+Quota and permissions follow the user's project. The host Cloud project is only used to register the OAuth client for the web app.
 
 ## Development
 
 ```bash
 npm run lint
 npm run build
+npm test
 ```
 
 ## Practical limits

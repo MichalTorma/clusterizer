@@ -13,6 +13,11 @@ import { earthEngineConfig, getEarthEngineConfigurationError } from './config'
 ;(globalThis as { ee?: unknown }).ee = ee
 
 let earthEngineInitialized = false
+let activeProjectId: string | undefined
+
+export function getActiveEarthEngineProjectId() {
+  return activeProjectId
+}
 
 export interface MapLayer {
   name: string
@@ -62,28 +67,48 @@ function callback<T>(run: (resolve: (value: T) => void, reject: (error: Error) =
 
 const EE_SCOPES = ['https://www.googleapis.com/auth/earthengine.readonly']
 
-function initializeEarthEngine(resolve: () => void, reject: (error: Error) => void) {
+function initializeEarthEngine(
+  projectId: string,
+  resolve: () => void,
+  reject: (error: Error) => void,
+) {
   ee.initialize(
     null,
     null,
     () => {
       earthEngineInitialized = true
+      activeProjectId = projectId
       resolve()
     },
-    (error: unknown) => reject(eeError(error)),
+    (error: unknown) => {
+      earthEngineInitialized = false
+      activeProjectId = undefined
+      reject(eeError(error))
+    },
     null,
-    earthEngineConfig.projectId,
+    projectId,
   )
 }
 
-export function authenticateEarthEngine() {
+/**
+ * Sign in as the current Google user and bind Earth Engine calls to *their*
+ * Cloud project (quota / permissions), the same model as the Code Editor.
+ */
+export function authenticateEarthEngine(projectId: string) {
   const configurationError = getEarthEngineConfigurationError()
   if (configurationError) return Promise.reject(new Error(configurationError))
 
+  const trimmed = projectId.trim()
+  if (!trimmed) {
+    return Promise.reject(new Error('Enter an Earth Engine–enabled Google Cloud project ID.'))
+  }
+
   return callback<void>((resolve, reject) => {
+    earthEngineInitialized = false
+    activeProjectId = undefined
     ee.data.authenticateViaOauth(
       earthEngineConfig.clientId,
-      () => initializeEarthEngine(resolve, reject),
+      () => initializeEarthEngine(trimmed, resolve, reject),
       (error: unknown) => reject(eeError(error)),
       EE_SCOPES,
       undefined,
