@@ -6,4 +6,17 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: process.env.VITE_BASE_PATH || '/',
+  build: {
+    // Earth Engine reads constructor parameter names (and the `opt_` prefix) at
+    // runtime. Identifier mangling turns Polygon(coords, opt_proj, ...) into
+    // Polygon(e, t, n, r, i) and then throws "Missing required arguments".
+    minify: 'terser',
+    terserOptions: {
+      mangle: false,
+      format: {
+        comments: false,
+      },
+    },
+    chunkSizeWarningLimit: 2000,
+  },
 })
