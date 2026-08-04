@@ -5,6 +5,7 @@ import { LocationSearch } from './components/LocationSearch'
 import { SetupGate } from './components/SetupGate'
 import {
   approximatePolygonAreaM2,
+  contrastTextForHex,
   polygonIsValid,
   trainingEstimateLabel,
   type AnalysisParameters,
@@ -356,6 +357,14 @@ function App() {
               </div>
               {selectedSummary && (
                 <p className="selection-chip">
+                  <span
+                    className="cluster-dot selection-chip-swatch"
+                    style={{
+                      background: selectedSummary.color,
+                      color: contrastTextForHex(selectedSummary.color),
+                    }}
+                    aria-hidden
+                  />
                   Selected type {selectedSummary.id} · {(selectedSummary.areaM2 / 10_000).toFixed(2)} ha
                   <button type="button" onClick={clearSelection}>Clear</button>
                 </p>
@@ -409,6 +418,11 @@ function App() {
                         <article
                           key={summary.id}
                           className={summary.id === selectedClusterId ? 'selected' : undefined}
+                          style={
+                            summary.id === selectedClusterId
+                              ? { boxShadow: `inset 3px 0 0 ${summary.color}` }
+                              : undefined
+                          }
                           onClick={() => void selectCluster(summary.id)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' || event.key === ' ') {
@@ -420,7 +434,16 @@ function App() {
                           tabIndex={0}
                           aria-pressed={summary.id === selectedClusterId}
                         >
-                          <span className="cluster-dot">{summary.id}</span>
+                          <span
+                            className="cluster-dot"
+                            style={{
+                              background: summary.color,
+                              color: contrastTextForHex(summary.color),
+                            }}
+                            title={`Nature type ${summary.id}`}
+                          >
+                            {summary.id}
+                          </span>
                           <div>
                             <strong>{(summary.areaM2 / 10_000).toFixed(2)} ha</strong>
                             <p>{summary.pixelCount.toLocaleString()} pixels · spread {summary.spread?.toFixed(3) ?? '—'}</p>

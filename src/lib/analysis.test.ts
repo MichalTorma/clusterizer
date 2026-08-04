@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   approximatePolygonAreaM2,
+  buildClusterPalette,
+  contrastTextForHex,
   polygonIsValid,
   trainingEstimateLabel,
 } from './analysis'
@@ -25,5 +27,18 @@ describe('analysis geometry helpers', () => {
 
   it('turns the estimate into a ten-metre pixel count', () => {
     expect(trainingEstimateLabel(square)).toMatch(/possible 10 m pixels/)
+  })
+})
+
+describe('cluster palette', () => {
+  it('builds one colour per actual cluster', () => {
+    expect(buildClusterPalette(0)).toEqual([])
+    expect(buildClusterPalette(5)).toHaveLength(5)
+    expect(new Set(buildClusterPalette(8)).size).toBe(8)
+  })
+
+  it('picks readable label contrast', () => {
+    expect(contrastTextForHex('#ffffff')).toBe('#173f32')
+    expect(contrastTextForHex('#102018')).toBe('#ffffff')
   })
 })

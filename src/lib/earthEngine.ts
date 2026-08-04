@@ -2,6 +2,7 @@ import ee from '@google/earthengine'
 import {
   EMBEDDING_BANDS,
   MAX_ALL_PIXEL_TRAINING_PIXELS,
+  buildClusterPalette,
   type AnalysisParameters,
 } from './analysis'
 import { earthEngineConfig, getEarthEngineConfigurationError } from './config'
@@ -42,6 +43,8 @@ export interface ClusterSummary {
   areaM2: number
   spread: number | null
   isRare: boolean
+  /** Map / legend colour for this nature type (matches the Nature types layer). */
+  color: string
 }
 
 export interface AnalysisResult {
@@ -420,16 +423,19 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
     ).filter(ee.Filter.gt('pixelCount', 0)),
   )
 
-  let summaries: ClusterSummary[] = rawStats.map((stat) => {
-    const pixelCountForCluster = Number(stat.pixelCount)
-    return {
-      id: Number(stat.cluster),
-      pixelCount: pixelCountForCluster,
-      areaM2: pixelCountForCluster * 100,
-      spread: null,
-      isRare: pixelCountForCluster * 100 < parameters.rareAreaM2,
-    }
-  })
+  let summaries: ClusterSummary[] = rawStats
+    .map((stat) => {
+      const pixelCountForCluster = Number(stat.pixelCount)
+      return {
+        id: Number(stat.cluster),
+        pixelCount: pixelCountForCluster,
+        areaM2: pixelCountForCluster * 100,
+        spread: null,
+        isRare: pixelCountForCluster * 100 < parameters.rareAreaM2,
+        color: '#b7d4b9',
+      }
+    })
+    .sort((a, b) => a.id - b.id)
 
   const spreadStats = await evaluateFeatureProperties(
     ee.FeatureCollection(
@@ -461,6 +467,20 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
     spread: Number(spreadStats.find((stat) => Number(stat.cluster) === summary.id)?.spread ?? 0),
   }))
 
+  const palette = buildClusterPalette(summaries.length)
+  summaries = summaries.map((summary, index) => ({
+    ...summary,
+    color: palette[index] ?? summary.color,
+  }))
+
+  // Remap EE class ids → 0..n-1 so the palette spans actual classes, not maxClusters.
+  const originalIds = summaries.map((summary) => summary.id)
+  const displayIds = originalIds.map((_, index) => index)
+  const displayClusters =
+    originalIds.length > 0
+      ? clusters.remap(originalIds, displayIds).rename('cluster')
+      : clusters
+
   const globalRarity = createGlobalRarityImage(image, clusters, summaries, rawStats)
   const localMean = image.reduceNeighborhood({
     reducer: ee.Reducer.mean(),
@@ -471,9 +491,13 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
     .subtract(image.multiply(localMean).reduce(ee.Reducer.sum()).divide(localNorm))
     .rename('local_rarity')
 
-  const palette = ['#6cc5a3', '#eab464', '#8d8fc7', '#d8799b', '#72a3c5', '#b5ca75', '#bf8bda', '#d4a57c']
+  const clusterVisMax = Math.max(palette.length - 1, 0)
   const [clusterUrl, globalRarityUrl, localRarityUrl] = await Promise.all([
-    mapUrl(clusters, { min: 0, max: parameters.maxClusters - 1, palette }),
+    mapUrl(displayClusters, {
+      min: 0,
+      max: clusterVisMax,
+      palette: palette.length > 0 ? palette : ['#b7d4b9'],
+    }),
     mapUrl(globalRarity, { min: 0, max: 1.25, palette: ['#183b4e', '#56c596', '#f6d365', '#ed6a5a'] }),
     mapUrl(localRarity, { min: 0, max: 0.35, palette: ['#183b4e', '#56c596', '#f6d365', '#ed6a5a'] }),
   ])

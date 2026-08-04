@@ -256,7 +256,6 @@ button { cursor: pointer; }
 .selection-chip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   margin: 12px 0 0;
   padding: 8px 10px;
@@ -266,7 +265,13 @@ button { cursor: pointer; }
   font-size: .74rem;
   font-weight: 700;
 }
+.selection-chip-swatch {
+  width: 18px;
+  height: 18px;
+  font-size: 0;
+}
 .selection-chip button {
+  margin-left: auto;
   border: 0;
   background: transparent;
   color: #a14a2e;
@@ -501,7 +506,7 @@ button { cursor: pointer; }
   border-color: #1f6a52;
   background: #eaf4ee;
 }
-.cluster-grid article.selected { box-shadow: inset 3px 0 0 #ff4d2e; }
+.cluster-grid article.selected { box-shadow: inset 3px 0 0 #1f6a52; }
 .cluster-grid article:focus-visible {
   outline: 2px solid #1f6a52;
   outline-offset: 2px;
@@ -523,6 +528,7 @@ button { cursor: pointer; }
   font-size: .7rem;
   font-weight: 800;
   flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(22, 54, 46, 0.18);
 }
 .cluster-grid em {
   margin-left: auto;
