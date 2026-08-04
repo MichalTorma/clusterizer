@@ -14,9 +14,20 @@ import { earthEngineConfig, getEarthEngineConfigurationError } from './config'
 
 let earthEngineInitialized = false
 let activeProjectId: string | undefined
+let googleSignedIn = false
+
+export interface CloudProjectOption {
+  projectId: string
+  displayName: string
+  earthEngineLabeled: boolean
+}
 
 export function getActiveEarthEngineProjectId() {
   return activeProjectId
+}
+
+export function isGoogleSignedIn() {
+  return googleSignedIn
 }
 
 export interface MapLayer {
@@ -65,56 +76,145 @@ function callback<T>(run: (resolve: (value: T) => void, reject: (error: Error) =
   return new Promise<T>((resolve, reject) => run(resolve, reject))
 }
 
-const EE_SCOPES = ['https://www.googleapis.com/auth/earthengine.readonly']
+/** EE compute + Cloud Resource Manager (project picker). */
+const OAUTH_SCOPES = [
+  'https://www.googleapis.com/auth/earthengine.readonly',
+  'https://www.googleapis.com/auth/cloud-platform.read-only',
+]
 
-function initializeEarthEngine(
-  projectId: string,
-  resolve: () => void,
-  reject: (error: Error) => void,
-) {
-  ee.initialize(
-    null,
-    null,
-    () => {
-      earthEngineInitialized = true
-      activeProjectId = projectId
-      resolve()
-    },
-    (error: unknown) => {
-      earthEngineInitialized = false
-      activeProjectId = undefined
-      reject(eeError(error))
-    },
-    null,
-    projectId,
-  )
+function requireClientId() {
+  const configurationError = getEarthEngineConfigurationError()
+  if (configurationError) throw new Error(configurationError)
+  return earthEngineConfig.clientId as string
+}
+
+function getAuthorizationHeader() {
+  const token = ee.data.getAuthToken?.() as string | null | undefined
+  if (!token) {
+    throw new Error('Sign in with Google before listing or selecting a Cloud project.')
+  }
+  return token
 }
 
 /**
- * Sign in as the current Google user and bind Earth Engine calls to *their*
- * Cloud project (quota / permissions), the same model as the Code Editor.
+ * Google sign-in only. Project selection / ee.initialize happen afterwards.
  */
-export function authenticateEarthEngine(projectId: string) {
-  const configurationError = getEarthEngineConfigurationError()
-  if (configurationError) return Promise.reject(new Error(configurationError))
+export function signInWithGoogle() {
+  const clientId = requireClientId()
 
+  return callback<void>((resolve, reject) => {
+    ee.data.authenticateViaOauth(
+      clientId,
+      () => {
+        googleSignedIn = true
+        resolve()
+      },
+      (error: unknown) => {
+        googleSignedIn = false
+        reject(eeError(error))
+      },
+      OAUTH_SCOPES,
+      undefined,
+      true,
+    )
+  })
+}
+
+/**
+ * List active Cloud projects the signed-in user can see.
+ * Earth Engine–labeled projects are sorted first when labels are present.
+ */
+export async function listAccessibleCloudProjects(): Promise<CloudProjectOption[]> {
+  const authorization = getAuthorizationHeader()
+  const projects: CloudProjectOption[] = []
+  let pageToken: string | undefined
+
+  do {
+    const url = new URL('https://cloudresourcemanager.googleapis.com/v3/projects:search')
+    url.searchParams.set('query', 'state:ACTIVE')
+    url.searchParams.set('pageSize', '200')
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+
+    const response = await fetch(url, {
+      headers: { Authorization: authorization },
+    })
+
+    if (!response.ok) {
+      const detail = await response.text()
+      if (response.status === 403) {
+        throw new Error(
+          'Could not list Cloud projects. Enable the Cloud Resource Manager API on the OAuth client Cloud project, then try again.',
+        )
+      }
+      throw new Error(`Project list failed (${response.status}): ${detail.slice(0, 240)}`)
+    }
+
+    const data = (await response.json()) as {
+      projects?: Array<{
+        projectId?: string
+        displayName?: string
+        labels?: Record<string, string>
+      }>
+      nextPageToken?: string
+    }
+
+    for (const project of data.projects ?? []) {
+      if (!project.projectId) continue
+      projects.push({
+        projectId: project.projectId,
+        displayName: project.displayName || project.projectId,
+        earthEngineLabeled: Boolean(project.labels && 'earth-engine' in project.labels),
+      })
+    }
+
+    pageToken = data.nextPageToken
+  } while (pageToken)
+
+  return projects.sort((a, b) => {
+    if (a.earthEngineLabeled !== b.earthEngineLabeled) return a.earthEngineLabeled ? -1 : 1
+    return a.displayName.localeCompare(b.displayName)
+  })
+}
+
+/**
+ * Bind Earth Engine API calls to the chosen Cloud project (quota / permissions).
+ */
+export function initializeEarthEngineProject(projectId: string) {
   const trimmed = projectId.trim()
   if (!trimmed) {
-    return Promise.reject(new Error('Enter an Earth Engine–enabled Google Cloud project ID.'))
+    return Promise.reject(new Error('Choose or enter an Earth Engine–enabled Google Cloud project.'))
+  }
+  if (!googleSignedIn && !ee.data.getAuthToken?.()) {
+    return Promise.reject(new Error('Sign in with Google before selecting a project.'))
   }
 
   return callback<void>((resolve, reject) => {
     earthEngineInitialized = false
     activeProjectId = undefined
-    ee.data.authenticateViaOauth(
-      earthEngineConfig.clientId,
-      () => initializeEarthEngine(trimmed, resolve, reject),
-      (error: unknown) => reject(eeError(error)),
-      EE_SCOPES,
-      undefined,
-      true,
+    ee.initialize(
+      null,
+      null,
+      () => {
+        earthEngineInitialized = true
+        activeProjectId = trimmed
+        googleSignedIn = true
+        resolve()
+      },
+      (error: unknown) => {
+        earthEngineInitialized = false
+        activeProjectId = undefined
+        reject(eeError(error))
+      },
+      null,
+      trimmed,
     )
   })
+}
+
+/** @deprecated Prefer signInWithGoogle + initializeEarthEngineProject. */
+export async function authenticateEarthEngine(projectId: string) {
+  await signInWithGoogle()
+  await initializeEarthEngineProject(projectId)
 }
 
 function analysisImage(parameters: AnalysisParameters) {

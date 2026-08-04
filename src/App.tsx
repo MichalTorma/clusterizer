@@ -9,7 +9,14 @@ import {
   type AnalysisParameters,
   type Position,
 } from './lib/analysis'
-import { authenticateEarthEngine, runAnalysis, type AnalysisResult } from './lib/earthEngine'
+import {
+  initializeEarthEngineProject,
+  listAccessibleCloudProjects,
+  runAnalysis,
+  signInWithGoogle,
+  type AnalysisResult,
+  type CloudProjectOption,
+} from './lib/earthEngine'
 import {
   getEarthEngineConfigurationError,
   readStoredProjectId,
@@ -42,8 +49,12 @@ function App() {
   const [maxClusters, setMaxClusters] = useState(16)
   const [rareAreaM2, setRareAreaM2] = useState(1_000)
   const [projectId, setProjectId] = useState(() => readStoredProjectId())
+  const [projects, setProjects] = useState<CloudProjectOption[]>([])
+  const [signedIn, setSignedIn] = useState(false)
   const [authenticated, setAuthenticated] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [loadingProjects, setLoadingProjects] = useState(false)
+  const [manualProjectEntry, setManualProjectEntry] = useState(false)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<AnalysisResult>()
@@ -120,17 +131,64 @@ function App() {
     }
   }
 
-  const authenticate = async () => {
+  const signIn = async () => {
+    setError(undefined)
+    setConnecting(true)
+    setAuthenticated(false)
+    try {
+      await signInWithGoogle()
+      setSignedIn(true)
+      setLoadingProjects(true)
+      try {
+        const listed = await listAccessibleCloudProjects()
+        setProjects(listed)
+        const preferred =
+          listed.find((project) => project.projectId === projectId)?.projectId
+          ?? listed.find((project) => project.earthEngineLabeled)?.projectId
+          ?? listed[0]?.projectId
+          ?? projectId
+        if (preferred) setProjectId(preferred)
+        if (!listed.length) setManualProjectEntry(true)
+      } catch (cause) {
+        console.error('Project list failed:', cause)
+        setProjects([])
+        setManualProjectEntry(true)
+        setError(
+          cause instanceof Error
+            ? `${cause.message} You can still enter a project ID manually.`
+            : 'Could not list projects. Enter a project ID manually.',
+        )
+      } finally {
+        setLoadingProjects(false)
+      }
+    } catch (cause) {
+      console.error('Earth Engine sign-in failed:', cause)
+      setSignedIn(false)
+      setAuthenticated(false)
+      setError(cause instanceof Error ? cause.message : 'Unable to sign in with Google.')
+      setPanelOpen(true)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const selectProject = async (nextProjectId = projectId) => {
+    const trimmed = nextProjectId.trim()
+    if (!trimmed) {
+      setError('Choose or enter an Earth Engine–enabled Google Cloud project.')
+      return
+    }
     setError(undefined)
     setConnecting(true)
     try {
-      writeStoredProjectId(projectId)
-      await authenticateEarthEngine(projectId)
+      writeStoredProjectId(trimmed)
+      setProjectId(trimmed)
+      await initializeEarthEngineProject(trimmed)
       setAuthenticated(true)
     } catch (cause) {
-      console.error('Earth Engine sign-in failed:', cause)
+      console.error('Earth Engine project init failed:', cause)
       setAuthenticated(false)
-      setError(cause instanceof Error ? cause.message : 'Unable to sign in to Earth Engine.')
+      setError(cause instanceof Error ? cause.message : 'Unable to use that Cloud project with Earth Engine.')
       setPanelOpen(true)
     } finally {
       setConnecting(false)
@@ -238,10 +296,18 @@ function App() {
                 </button>
                 <button
                   className="sign-in"
-                  onClick={() => void authenticate()}
-                  disabled={Boolean(configurationError) || connecting || !projectId.trim()}
+                  onClick={() => void (signedIn ? selectProject() : signIn())}
+                  disabled={Boolean(configurationError) || connecting || (signedIn && !projectId.trim())}
                 >
-                  {connecting ? 'Connecting…' : authenticated ? 'Reconnect' : 'Connect EE'}
+                  {connecting
+                    ? signedIn
+                      ? 'Connecting…'
+                      : 'Signing in…'
+                    : authenticated
+                      ? 'Reconnect'
+                      : signedIn
+                        ? 'Use project'
+                        : 'Sign in'}
                 </button>
               </div>
             </div>
@@ -256,27 +322,75 @@ function App() {
 
               <div className="section-heading"><span>EE</span><h2>Your Earth Engine project</h2></div>
               <p className="hint">
-                Clusterizer is only a UI. Analysis runs as you, on your EE-enabled Cloud project — the same model as the Code Editor.
+                Sign in with Google, then pick a Cloud project you can already use in the Code Editor.
               </p>
-              <label>
-                Cloud project ID
-                <input
-                  type="text"
-                  value={projectId}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="my-ee-cloud-project"
-                  onChange={(event) => {
-                    setProjectId(event.target.value)
-                    if (authenticated) setAuthenticated(false)
-                  }}
-                />
-              </label>
-              <p className="hint">
-                {authenticated
-                  ? `Connected — requests use project “${projectId.trim()}”.`
-                  : 'Find this in the Earth Engine Code Editor project picker, or in Google Cloud Console.'}
-              </p>
+              {!signedIn ? (
+                <p className="hint">Click <strong>Sign in</strong> to load your projects.</p>
+              ) : (
+                <>
+                  {loadingProjects ? (
+                    <p className="hint">Loading your Cloud projects…</p>
+                  ) : projects.length > 0 && !manualProjectEntry ? (
+                    <label>
+                      Cloud project
+                      <select
+                        value={projectId}
+                        onChange={(event) => {
+                          setProjectId(event.target.value)
+                          if (authenticated) setAuthenticated(false)
+                        }}
+                      >
+                        {projects.map((project) => (
+                          <option key={project.projectId} value={project.projectId}>
+                            {project.displayName}
+                            {project.displayName !== project.projectId ? ` (${project.projectId})` : ''}
+                            {project.earthEngineLabeled ? ' · EE' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label>
+                      Cloud project ID
+                      <input
+                        type="text"
+                        value={projectId}
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder="my-ee-cloud-project"
+                        onChange={(event) => {
+                          setProjectId(event.target.value)
+                          if (authenticated) setAuthenticated(false)
+                        }}
+                      />
+                    </label>
+                  )}
+                  <div className="button-row">
+                    {projects.length > 0 && (
+                      <button
+                        type="button"
+                        className="subtle-button"
+                        onClick={() => setManualProjectEntry((value) => !value)}
+                      >
+                        {manualProjectEntry ? 'Use project list' : 'Enter ID manually'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="subtle-button"
+                      disabled={loadingProjects || connecting}
+                      onClick={() => void signIn()}
+                    >
+                      Refresh projects
+                    </button>
+                  </div>
+                  <p className="hint">
+                    {authenticated
+                      ? `Ready — Earth Engine requests use “${projectId.trim()}”.`
+                      : 'Choose a project, then click Use project.'}
+                  </p>
+                </>
+              )}
 
               <div className="section-heading"><span>00</span><h2>Zoom to location</h2></div>
               <p className="hint">Search for a place, then draw the analysis area around it.</p>

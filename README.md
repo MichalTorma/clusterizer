@@ -29,7 +29,8 @@ X-Means is used because it runs natively in Earth Engine and selects a cluster c
 4. In the GitHub repo: **Settings → Secrets and variables → Actions → Variables**, add:
    - `VITE_EE_OAUTH_CLIENT_ID` = your OAuth client ID  
    - optional `VITE_EE_PROJECT_ID` = default project suggestion only
-5. Push to `main` (or run the **Deploy GitHub Pages** workflow manually).
+5. On the same Google Cloud project that owns the OAuth client, enable **Cloud Resource Manager API** (needed so signed-in users can load their project list).
+6. Push to `main` (or run the **Deploy GitHub Pages** workflow manually).
 
 The site will be at `https://<user>.github.io/<repo>/`.
 
@@ -51,11 +52,13 @@ npm run dev
 ## Using the tool (any EE user)
 
 1. Open the hosted app (or local dev server).
-2. Enter **your** Earth Engine Cloud project ID (same project as in the Code Editor).
-3. Click **Connect EE** and sign in with the Google account that has Earth Engine access.
+2. Click **Sign in** with the Google account that has Earth Engine access.
+3. Pick a Cloud project from the list (or enter an ID manually), then **Use project**.
 4. Draw or upload an analysis area, then run the analysis.
 
 Quota and permissions follow the user's project. The host Cloud project is only used to register the OAuth client for the web app.
+
+For the project picker, enable **Cloud Resource Manager API** on the Google Cloud project that owns the OAuth client ID.
 
 ## Development
 
