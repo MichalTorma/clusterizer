@@ -11,7 +11,7 @@ import {
   type AnalysisParameters,
   type Position,
 } from './lib/analysis'
-import { runAnalysis, type AnalysisResult } from './lib/earthEngine'
+import { runAnalysis, SessionExpiredError, type AnalysisResult } from './lib/earthEngine'
 import {
   getEarthEngineConfigurationError,
   readStoredProjectId,
@@ -69,6 +69,15 @@ function App() {
     setHighlightUrl(undefined)
   }
 
+  const handleSessionExpired = () => {
+    setAutoResumeSetup(true)
+    setSetupComplete(false)
+    setResult(undefined)
+    clearSelection()
+    setError(undefined)
+    setPanelOpen(true)
+  }
+
   const selectCluster = async (clusterId: number, point?: Position) => {
     if (!result) return
     setTool('inspect')
@@ -84,6 +93,10 @@ function App() {
       }
     } catch (cause) {
       console.error('Cluster highlight failed:', cause)
+      if (cause instanceof SessionExpiredError) {
+        handleSessionExpired()
+        return
+      }
       setError(cause instanceof Error ? cause.message : 'Unable to highlight that nature type.')
     } finally {
       setInspecting(false)
@@ -117,6 +130,10 @@ function App() {
       }
     } catch (cause) {
       console.error('Cluster sample failed:', cause)
+      if (cause instanceof SessionExpiredError) {
+        handleSessionExpired()
+        return
+      }
       setError(cause instanceof Error ? cause.message : 'Unable to sample that map location.')
     } finally {
       setInspecting(false)
@@ -171,6 +188,10 @@ function App() {
       setPanelOpen(true)
     } catch (cause) {
       console.error('Earth Engine analysis failed:', cause)
+      if (cause instanceof SessionExpiredError) {
+        handleSessionExpired()
+        return
+      }
       setError(cause instanceof Error ? cause.message : 'The analysis could not be completed.')
       setPanelOpen(true)
     } finally {
@@ -415,7 +436,20 @@ function App() {
                   <div className="result-content">
                     <div className="result-meta">
                       <strong>{result.pixelCount.toLocaleString()}</strong> pixels · 10 m
-                      <button className="download-button" onClick={() => void result.download()}>GeoTIFF</button>
+                      <button
+                        className="download-button"
+                        onClick={() => {
+                          void result.download().catch((cause) => {
+                            if (cause instanceof SessionExpiredError) {
+                              handleSessionExpired()
+                              return
+                            }
+                            setError(cause instanceof Error ? cause.message : 'Unable to download GeoTIFF.')
+                          })
+                        }}
+                      >
+                        GeoTIFF
+                      </button>
                     </div>
                     <div className="cluster-grid">
                       {result.summaries.map((summary) => (

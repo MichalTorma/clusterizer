@@ -193,6 +193,13 @@ export async function ensureGoogleSignedIn() {
   }
 }
 
+export class SessionExpiredError extends Error {
+  constructor(message = 'Earth Engine session expired. Sign in again to continue.') {
+    super(message)
+    this.name = 'SessionExpiredError'
+  }
+}
+
 export type ProjectListErrorKind = 'crm_disabled' | 'other'
 
 export interface ProjectListVerification {
@@ -604,6 +611,7 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
       { name: 'Local contrast', url: localRarityUrl, opacity: 0.75 },
     ],
     sampleClusterAt: async (longitude, latitude) => {
+      if (!(await ensureGoogleSignedIn())) throw new SessionExpiredError()
       const sampled = await evaluate<number | null>(
         clusters
           .reduceRegion({
@@ -616,7 +624,8 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
       )
       return sampled == null || Number.isNaN(Number(sampled)) ? null : Number(sampled)
     },
-    getClusterHighlightUrl: (clusterId) => {
+    getClusterHighlightUrl: async (clusterId) => {
+      if (!(await ensureGoogleSignedIn())) throw new SessionExpiredError()
       const cached = highlightUrlCache.get(clusterId)
       if (cached) return cached
 
@@ -630,6 +639,7 @@ export async function runAnalysis(parameters: AnalysisParameters): Promise<Analy
       return pending
     },
     download: async () => {
+      if (!(await ensureGoogleSignedIn())) throw new SessionExpiredError()
       const url = await callback<string>((resolve, reject) =>
         clusters.getDownloadURL(
           {
